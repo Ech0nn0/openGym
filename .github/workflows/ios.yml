@@ -1,0 +1,50 @@
+name: Build iOS IPA (unsigned, pour SideStore)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer les dépendances
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build web + sync iOS
+        working-directory: frontend
+        run: |
+          npm run build:mobile
+          npx cap sync ios
+
+      - name: CocoaPods (si le projet en utilise)
+        working-directory: frontend/ios/App
+        run: if [ -f Podfile ]; then pod install; fi
+
+      - name: Compiler l'app sans signature
+        working-directory: frontend/ios/App
+        run: |
+          if [ -d App.xcworkspace ]; then TARGET="-workspace App.xcworkspace"; else TARGET="-project App.xcodeproj"; fi
+          xcodebuild $TARGET -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Créer l'IPA
+        working-directory: frontend/ios/App
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qr openGym-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openGym-ipa
+          path: frontend/ios/App/openGym-unsigned.ipa
